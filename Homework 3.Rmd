@@ -1,0 +1,185 @@
+---
+title: "HW #3 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/3/10"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+## Import data
+Import data set `enviANDdensity` and extract density data of fish and copepod from the data set
+```{r}
+library(knitr)
+enviANDdensity <- read.table("enviANDdensity.txt", header = T)
+fish_density=as.matrix(enviANDdensity[,11])
+copepod_density=as.matrix(enviANDdensity[,12])
+kable(head(cbind(fish_density,copepod_density)),digits=2,col.names = c("Fish density","Copepod density"),align="l",caption="Fish and copepod density data")
+```
+
+## 1. Compute the *mean* and *SE(mean)* for the fish and copepod densities respectively, using both normal theory and non-parametric bootstrap. Plot the histogram of bootstrapped means with bootstrap 1000 times.
+
+### Function to generate bootstrap samples
+Create function `boot.samp` to generate bootstrap samples for a given sample and a statistic of interest
+```{r}
+boot.samp <- function(samp,n,stat){
+    FUN=match.fun(stat)
+    
+    #create and randomize n sets of bootstrap samples
+    size=length(samp)
+    shuffle=rep(samp,n)[order(runif(size*n))]
+    
+    #split bootstrap samples and calculate the statistic of interest for each set
+    bt=apply(matrix(shuffle,size,n),2,FUN)
+    
+    #return bootstrap samples
+    return(bt)
+}
+```
+
+### Function to report bootstrap results
+Create function `boot.result` to report the estimated statistic and its standard error.
+```{r}
+boot.result <- function(bt.samp,origin.mean=NULL){
+    
+    #calculate the estimated parameter and SE for bootstrap
+    result=t(as.matrix(cbind(mean(bt.samp),sd(bt.samp))))
+    
+    # If mean is the statistic of interest, calculate SE using normal theory
+    if(!is.null(origin.mean)){
+        origin=t(as.matrix(cbind(mean(origin.mean),sd(origin.mean)/sqrt(length(origin.mean)))))
+        result=cbind(origin,result)
+        colnames(result) <- c("Normal theory","Bootstrap")
+        rownames(result) <- c("Estimated parameter","Estimated standard error")
+    }
+    
+    else{
+        colnames(result) <- c("Bootstrap")
+        rownames(result) <- c("Estimated parameter","Estimated standard error")
+    }
+    return(result)
+}
+```
+
+### Function to plot a histogram for bootstrap samples
+Create function `boot.plot` to plot the bootstrap samples with a histogram
+```{r}
+boot.plot <- function(bt.samp,p.title="Bootstrap histogram",hist.break=50){
+    
+    #plot the histogram of bootstrap samples along with a smoothed density curve and     95% confidence interval
+    hist(bt.samp,breaks=hist.break,col="gray",main=p.title,prob=T,xlab=NULL)
+    lines(density(bt.samp),col="blue",lwd=2)
+    abline(v=sort(bt.samp)[length(bt.samp)*c(0.025, 0.975)],col="red",lwd=2)
+    legend("topright",lty=c(1,1),legend=c("Smoothed density","95% CI"),col=c("blue","red"),lwd=2)
+}
+```
+
+### Generate bootstrap samples for the mean of fish and copepod density 
+Bootstrap samples are generated using the function created above. Sample size is set to 1000.
+```{r}
+fish_mean_bt=boot.samp(fish_density,1000,mean)
+copepod_mean_bt=boot.samp(copepod_density,1000,mean)
+```
+
+### Bootstrap results for the mean of fish density
+```{r}
+boot.fish.mean=boot.result(fish_mean_bt,fish_density)
+kable(boot.fish.mean,digits=2,caption="Comparison of normal theory v.s bootstrap for fish density mean",align="l")
+boot.plot(fish_mean_bt,"Bootstrap samples of fish density mean")
+```
+
+### Bootstrap results for the mean of copepod density
+```{r}
+boot.copepod.mean=boot.result(copepod_mean_bt,copepod_density)
+kable(boot.copepod.mean,digits=2,caption="Comparison of normal theory v.s bootstrap for copepod density mean",align="l")
+boot.plot(copepod_mean_bt,"Bootstrap samples of copepod density mean")
+```
+
+## 2. Compute the *median* and bootstrapped *SE(median)* for the fish and copepod densities.Plot the histogram of bootstrapped medians with bootstrap 1000 times.
+
+### Generate bootstrap samples for the median of fish and copepod density
+Bootstrap sampls are generated using the function created above. Sample size is set to 1000.
+```{r}
+fish_median_bt=boot.samp(fish_density,1000,median)
+copepod_median_bt=boot.samp(copepod_density,1000,median)
+```
+
+### Bootstrap results for the median of fish density
+```{r}
+boot.fish.median=boot.result(fish_median_bt)
+kable(boot.fish.median,digits=2,caption="Bootstrap result for fish density median",align="l")
+boot.plot(fish_median_bt,"Bootstrap samples of fish density median")
+```
+
+### Bootstrap results for the median of copepod density
+```{r}
+boot.copepod.median=boot.result(copepod_median_bt)
+kable(boot.copepod.median,digits=2,caption="Bootstrap result for copepod density median",align="l")
+boot.plot(copepod_median_bt,"Bootstrap samples of copepod density median")
+```
+
+## 3a. Plot fish (dependent) v.s copepod (independent) and the regression line.
+```{r}
+# set dependent variable
+Y=fish_density
+
+# set intercept and independent variable
+X=cbind(rep(1,length(copepod_density)),copepod_density)
+
+# compute coefficients
+B = solve(t(X) %*% X) %*% (t(X) %*% Y)
+
+# plot fish  v.s copepod
+plot(copepod_density,fish_density,xlab="Copepod density",ylab="Fish density",pch=16,col="blue")
+
+# add the regression line
+x=seq(min(copepod_density),max(copepod_density),length=100)
+lines(x,B[1]+B[2]*x,col="red",lwd=2)
+legend("bottomright",pch=c(16,NA),lty=c(0,1),legend=c("Actual","Predicted"),col=c("blue","red"),lwd=2)
+```
+
+## 3b. Compute the regression coefficients for the linear model $Fish = \beta_0+\beta_1 \times Copepod$ and bootstrapped *SE(£]0)* and *SE(£]1)*. Plot the histogram of bootstrapped *£]0* and *£]1* with bootstrap 1000 times.
+
+### Function to generate bootstrap samples for coefficients in a model
+Create function `lm.boot` to generate bootstrap samples for coefficients in a linear regression model for given dependent and independent variables
+```{r}
+lm.boot <- function(dv,iv,n){
+    
+    B.sample=numeric()
+    
+    for(i in 1:n){
+        
+        #generate bootstrap samplea for coefficients in a linear regression model
+        size=length(dv)
+        samp=as.matrix(cbind(dv,iv))[ceiling(runif(size,0,size)),]
+        Y=samp[,1]
+        X=cbind(rep(1,length(samp[,1])),samp[,-1])
+        beta = solve(t(X) %*% X) %*% (t(X) %*% Y)
+        B.sample=append(B.sample,beta)
+    }
+    #return bootstrap samples for the coefficients
+    return(t(matrix(B.sample,dim(samp)[2],n)))
+}
+```
+
+### Bootstrap for coefficients in linear model $Fish = \beta_0+\beta_1 \times Copepod$
+Conduct bootstrap on coefficients $B_0$, $B_1$ and report results using the `lm.boot` and `boot.result` functions created above
+```{r}
+lm.bt=lm.boot(fish_density,copepod_density,1000)
+```
+
+### Report bootstrap results for coefficient B0
+```{r}
+result.lm.B0=boot.result(lm.bt[,1])
+kable(result.lm.B0,digits=2,caption="Bootstrap result of coefficient B0",align="l")
+boot.plot(lm.bt[,1],"Histogram for bootstrap samples of coefficient B0")
+```
+
+### Report bootstrap results for coefficient B1
+```{r}
+result.lm.B1=boot.result(lm.bt[,2])
+kable(result.lm.B1,digits=2,caption="Bootstrap result of coefficient B1",align="l")
+boot.plot(lm.bt[,2],"Histogram for bootstrap samples of coefficient B1")
+```

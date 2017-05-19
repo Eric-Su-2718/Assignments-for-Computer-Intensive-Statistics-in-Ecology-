@@ -1,0 +1,132 @@
+---
+title: "HW #11 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/5/5"
+output: html_document
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+### Load packages
+```{r message=FALSE}
+library(vegan)
+library(cluster)
+library(knitr)
+```
+
+## Q1. Use the ¡§dominant¡¨ copepod species data (from HW1) and environmental data (from HW3). Apply constrained ordination: 1)determine an appropriate response model; 2)select a set of independent variables; 3) conduct ordination (RDA or CCA); 4) interpret the results. Try different plotting methods; e.g., to display your cluster analysis results on the triplot and interpret how the groups vary with respect to environmental variables.
+
+### Import data
+Import copepod data, environmental data and extract dominant species data. Also extract group from the result of hierarchical clustering in [previous homework](http://rpubs.com/prorichter/267782).
+```{r}
+#import copepod data
+copdata = read.table("copepod_composition.txt", header = T)
+
+#import species name
+species_name <- read.table("copepodSPlist.txt", sep = "\t")
+
+#assign copepod species name
+rownames(copdata) <- as.character(unlist(species_name))
+
+#convert species frequency into percentage
+copdata = copdata / 100
+
+#load and extract environmental data
+envdata = read.table("enviANDdensity.txt", header = T)
+rownames(envdata) <- envdata[, 1]
+envdata = envdata[, -1]
+
+#find dominant species
+dom = apply(copdata >= 0.02, 2, which)
+dom = sort(unique(unlist(dom)))
+dom = t(copdata[dom, ])
+
+#normalize species data
+dom_log = log(dom + 1)
+dom_norm = dom_log / rowSums(dom_log)
+
+#calculate distance matrix
+dist_dom = vegdist(dom, method = "jaccard")
+
+#perform hierarchical clustring
+hc_dom = agnes(dist_dom, method = "ward")
+group = cutree(hc_dom, 3)
+group = factor(group, labels = c("Spring", "Summer", "Winter"))
+```
+
+### Determine an appropriate response model
+Using the gradient(axis) length from DCA, determine whether linear or unimodel model is more appropriate.
+```{r}
+dom_dca <- decorana(dom_log)
+dom_dca
+```
+
+It appears that a unimodel is more likely, redundancy analysis will be used.
+
+### Explore magnitude and dependency of independent variables
+Calculate the inertia proportion and VIF in RDA of each independent variable.
+```{r}
+con_eig = numeric()
+for(i in 1:ncol(envdata)){
+    m = rda(dom_norm ~ envdata[, i])
+    con_eig[i] = m$CCA$eig / m$tot.chi
+}
+kable(cbind(con_eig, vif.cca(rda(dom_norm ~ ., data = data.frame(envdata)))), col.names = c("Inertia proportion", "VIF"), digits = 3)
+```
+
+### Variable selection
+Exclude variables with a VIF larger than 10 to avoid multicollinearity. Variables excluded are `Dissolved Oxygen`, `Temperature` and `MaxF`. The inertia proportion and VIF in RDA of other independent variables are shown below.
+```{r}
+envdata_uncor = envdata[, -c(2, 5, 6)]
+kable(cbind(con_eig[-c(5, 2, 6)], vif.cca(rda(dom_norm ~ . -DissolvedOxygen - Temperature - maxF, data = data.frame(envdata)))), col.names = c("Inertia proportion", "VIF"), digits = 3)
+```
+
+### Conduct redundancy analysis
+```{r}
+dom_rda <- rda(dom_norm ~ ., data = envdata_uncor)
+summary(dom_rda)
+```
+
+Our RDA model accounts for `r paste(100 * round(dom_rda$CCA$tot.chi / dom_rda$tot.chi, 2), "%", sep = "")` of inertia (variance).
+
+### Visulize result of redundancy analysis with triplots
+Groups we get from hierarchical clustering will be shown with ellipse.
+```{r fig.height=8, fig.width=12}
+#triplot without names of species and sites
+ordiplot(dom_rda)
+ordiellipse(dom_rda,group,conf = 0.95, lty = 2, label = T)
+
+#triplot with names of species and sites
+ordiplot(dom_rda, type = "text")
+ordiellipse(dom_rda,group,conf = 0.95, lty = 2)
+```
+
+We can see that the $1^{st}$ axis of RDA has almost the same direction as `MaxDO` with `Depth` and `Fluorescence` having oppisite direction with it. It also seems that the $1^{st}$ axis seperates sites in spring from others and the $2^{nd}$ axis seperates winter from others. However, overlaps do exist and this means these RDA axis might not reflect season differences too well.
+
+## Q2. Use the ¡§dominant¡¨ copepod species data (from HW1) and environmental data (from HW3). Apply partial RDA (or CCA) to quantify how variance of species community is attributed to biological and physical habitat effects. In enviANDdensity.xls, columns B-J are physical variables, and columns K and L are biological variables. 
+
+### Extract biological and physical hibitat variables
+```{r}
+phy = envdata[, 1:9]
+bio = envdata[, 10:11]
+```
+
+### Conduct partial RDA for biological and physical hibitat effects
+```{r}
+all_rda <- rda(dom_norm ~ ., data = envdata)
+phy_rda <- rda(dom_norm, phy, bio)
+bio_rda <- rda(dom_norm, bio, phy)
+phy_r2 = phy_rda$CCA$tot.chi / phy_rda$tot.chi
+bio_r2 = bio_rda$CCA$tot.chi / bio_rda$tot.chi
+joint_r2 = all_rda$CCA$tot.chi / all_rda$tot.chi - phy_r2 - bio_r2
+```
+
+Physical variables along account for `r paste(100 * round(phy_r2, 2), "%", sep = "")` of variance, biological variables along account for `r paste(100 * round(bio_r2, 2), "%", sep = "")` of variance and the joint effect of these variables account for `r paste(100 * round(joint_r2, 2), "%", sep = "")` of variance. These variance are not adjusted by number of variables.
+
+### Visulize result of variance partitioning
+Graphical results are based on adjusted $R^2$ (variance)
+```{r fig.width=8}
+vp = varpart(dom_norm, phy, bio)
+plot(vp, bg = c("red", "blue"), Xnames = c("Physical", "Biological"), alpha = 80)
+```
+
+Physical variables account for much more variance than biological variables.
