@@ -1,0 +1,299 @@
+---
+title: 'HW #4 Computer Intensive Statistics in Ecology'
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/3/16"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+## Load packages 
+Load `knitr` for better report quality with markdown, `ggplot2` for better plot quality and `reshape2` for rearranging data
+```{r}
+library(knitr)
+library(ggplot2)
+library(reshape2)
+```
+
+## Import data
+Import data set `enviANDdensity` and extract density data of fish and copepod from the data set
+```{r}
+enviANDdensity <- read.table("enviANDdensity.txt", header = T)
+fish_density=as.matrix(enviANDdensity[,11])
+copepod_density=as.matrix(enviANDdensity[,12])
+
+# display a part of the data
+kable(head(cbind(fish_density,copepod_density)),digits=2,col.names = c("Fish density","Copepod density"),align="l",caption="Fish and copepod density data (partial)")
+```
+
+## 1. Compute the **mean** and **standard error** of the mean for the fish and copepod density (all data points) respectively using Jackknife. Plot the histogram of Jackknife means.
+
+## Function to generate samples for jackknife or bootstrap methods
+Define function `resamp`for generating samples
+```{r}
+resamp <- function(data,method,stat=mean,boot_n=1000){
+    FUN=match.fun(stat)
+    
+    if(method=="Jackknife" | method== "jackknife"){
+        #create jackknife samples
+        resamp=numeric()
+        for(i in 1:length(data)){
+            resamp[i]=FUN(data[-i])
+        }
+    }
+    else if(method=="Bootstrap" | method== "bootstrap"){
+        
+        #create and randomize n sets of bootstrap samples
+        size=length(data)
+        shuffle=rep(data,boot_n)[order(runif(size*boot_n))]
+    
+        #split bootstrap samples and calculate the statistic of interest for each set
+        resamp=apply(matrix(shuffle,size,boot_n),2,FUN)
+    }
+    else{
+        stop("Please define a resampling method")
+    }
+    return(resamp)
+}
+```
+
+### Function to report jackknife or bootstrap results
+Define function `resamp.result` to report the estimated statistic and its standard error. If mean is the statistic of interested, analytical results can also be obtained by giving the original sample as an input.
+```{r}
+resamp.result <- function(samp,method,origin.mean=NULL){
+    
+    #calculate the estimated parameter and SE for jackknife
+    if(method=="Jackknife" | method== "jackknife"){
+        result=t(cbind(mean(samp),sd(samp)*sqrt((length(samp)-1)^2/length(samp))))
+        colnames(result) <- "Jackknife"
+    }
+    
+    #calculate the estimated parameter and SE for bootstrap
+    else if(method=="Bootstrap" | method== "bootstrap"){
+        result=t(as.matrix(cbind(mean(samp),sd(samp))))
+        colnames(result) <- "Bootstrap"
+    }
+    else{
+        stop("Please define a resampling method")
+    }
+    
+    # If mean is the statistic of interest, also calculate the estimated mean and SE using normal theory given the original data
+    if(!is.null(origin.mean)){
+        origin=t(as.matrix(cbind(mean(origin.mean),sd(origin.mean)/sqrt(length(origin.mean)))))
+        result=cbind(origin,result)
+        colnames(result)[1] <- "Normal theory"
+    }
+    rownames(result) <- c("Estimated parameter","Estimated standard error")
+        
+    return(result)
+}
+```
+
+## Function to plot samples using a histogram
+Define function `samp.plot` to plot histogram for sample
+```{r}
+samp.plot <- function(data1,data2=NULL,dens=T,col.names=c("Jackknife","Bootstrap"),title="",xlab="",bins=30){
+    
+    # If only one data set is given
+    if(is.null(data2)){
+        data1=as.data.frame(data1)
+        colnames(data1) <- "Density"
+        # plot the histogram using ggplot
+        ggp <- ggplot(data1,aes(x=Density)) +
+            geom_histogram(aes(y =..density..),col="red",fill="green",alpha=0.2,bins = bins) +
+            labs(title=title,x=xlab,y="Frequency")
+        if(dens){
+            ggp=ggp+geom_density(col="red") 
+        }
+    }
+    
+    else{
+        if(length(data1) < length(data2)){
+        data=cbind(c(data1,rep(NA,length(data2)-length(data1))),data2)
+        }
+        else if(length(data1) > length(data2)){
+        data=cbind(data1,c(data2,rep(NA,length(data1)-length(data2))))
+        }
+        else {data=cbind(data1,data2)}
+        
+        colnames(data) <- col.names
+        data=melt(data)
+        data=subset(data,!is.na(value))
+        colnames(data) <- c("num","Method","Density")
+
+        ggp <- ggplot(as.data.frame(data),aes(x=Density,color=Method,fill=Method)) +
+            facet_grid(.~Method,scales="free") +
+            geom_histogram(aes(y =..density..),alpha=0.2,bins=bins) +
+            labs(title=title,
+                x=xlab,y="Frequency")
+        if(dens){
+            ggp=ggp+geom_density(alpha=0) 
+        }
+    }
+    return(ggp)
+}
+``` 
+
+### Generate jackknife samples for the mean of fish and copepod density 
+```{r}
+fish_mean_jk=resamp(fish_density,"Jackknife",mean)
+copepod_mean_jk=resamp(copepod_density,"Jackknife",mean)
+```
+
+### Jackknife results for the mean of fish density
+```{r}
+jk_fish_mean_result=resamp.result(fish_mean_jk,"Jackknife",fish_density)
+kable(jk_fish_mean_result,digits=2,caption="Comparison of normal theory v.s jackknife for fish density mean",align="l")
+samp.plot(fish_mean_jk,title="Jackknife samples of fish density mean",xlab="Fish density")
+```
+
+### Jackknife results for the mean of copepod density
+```{r}
+jk_copepod_mean_result=resamp.result(copepod_mean_jk,"Jackknife",copepod_density)
+kable(jk_copepod_mean_result,digits=2,caption="Comparison of normal theory v.s jackknife for copepod density mean",align="l")
+samp.plot(copepod_mean_jk,title="Jackknife samples of copepod density mean",xlab="Copepod density")
+```
+
+## 2. Compute the regression coefficients for $Fish = \beta_0+\beta_1 \times Copepod$ and Jackknife *SE* of $\beta_0$, $\beta_1$. Plot the histogram of Jackknife $\beta_0$, $\beta_1$.
+
+### Calculate the esimated coefficients and their SE using normal theory
+```{r}
+# set dependent variable
+Y=fish_density
+
+# set intercept and independent variable
+X=cbind(1,copepod_density)
+
+# compute coefficients
+B = solve(t(X) %*% X) %*% (t(X) %*% Y)
+
+# compute the standard deviation for the coefficients
+var_B <- anova(lm(Y ~ X))[[3]][2] * solve(t(X) %*% X)
+std_B <- sqrt(diag(var_B))
+nor_B <- t(cbind(B,std_B))
+colnames(nor_B) <- c("Normal theory","Normal theory")
+rownames(nor_B) <- c("Estimated parameter","Estimated standard error")
+```
+
+### Function to generate jackknife or bootstrap samples for coefficients in a model
+Define function `lm.resamp` to generate samples for coefficients in a linear regression model for given dependent and independent variables
+```{r}
+lm.resamp <- function(dv,iv,method,boot_n=1000){
+    
+    B_sample=numeric()
+    sampsize=length(dv)
+    
+    #generate jackknife samples for coefficients in a linear regression model
+    if(method=="Jackknife" | method== "jackknife"){
+        resamp_size=sampsize
+        for(i in 1:resamp_size){
+            samp=as.matrix(cbind(dv,iv))[-i,]
+            Y=samp[,1]
+            X=cbind(rep(1,length(samp[,1])),samp[,-1])
+            beta = solve(t(X) %*% X) %*% (t(X) %*% Y)
+            B_sample=append(B_sample,beta)
+        }
+        
+    }
+    #generate bootstrap samples for coefficients in a linear regression model
+    else if(method=="Bootstrap" | method== "bootstrap"){
+        resamp_size=boot_n
+        for(i in 1:boot_n){
+            samp=as.matrix(cbind(dv,iv))[ceiling(runif(sampsize,0,sampsize)),]
+            Y=samp[,1]
+            X=cbind(rep(1,length(samp[,1])),samp[,-1])
+            beta = solve(t(X) %*% X) %*% (t(X) %*% Y)
+            B_sample=append(B_sample,beta)
+        }
+    }
+    else{
+        stop("Please define a resampling method")
+    }
+    #return samples for the coefficients
+    return(t(matrix(B_sample,dim(iv)[2]+1,resamp_size)))
+}
+```
+
+### Use the jackknife method to estimate coefficients in linear model $Fish = \beta_0+\beta_1 \times Copepod$
+Conduct jackknife on coefficients $\beta_0$, $\beta_1$ using the `lm.resamp` function created above
+```{r}
+lm_jk=lm.resamp(fish_density,copepod_density,"jackknife")
+```
+
+### Report jackknife results for coefficient $\beta_0$
+```{r}
+jk_lm_B0=resamp.result(lm_jk[,1],"jackknife")
+B0_est=cbind(nor_B[,1],jk_lm_B0)
+colnames(B0_est) <- c("Normal theory","Jackknife")
+rownames(B0_est) <- c("Estimated parameter","Estimated standard error")
+kable(B0_est,digits=2,align="l",caption="Analytical and Jackknife estimates of coefficient B0")
+samp.plot(lm_jk[,1],title="Histogram for jackknife samples of coefficient B0",xlab="B0")
+```
+
+### Report jackknife results for coefficient $\beta_1$
+```{r}
+jk_lm_B1=resamp.result(lm_jk[,2],"jackknife")
+B1_est=cbind(nor_B[,2],jk_lm_B1)
+colnames(B1_est) <- c("Normal theory","Jackknife")
+rownames(B1_est) <- c("Estimated parameter","Estimated standard error")
+kable(B1_est,digits=2,align="l",caption="Analytical and Jackknife estimates of coefficient B1")
+samp.plot(lm_jk[,2],title="Histogram for jackknife samples of coefficient B1",xlab="B1")
+```
+
+
+## 3. Compare the estimates for Q1 and Q2 obtained from normal theory, bootstrap, and jackknife.
+
+### Calculate estimated mean and SE(mean) fish and copepod density using bootstrap 
+Estimates are calculated using functions created above. Bootstrap Sample size is set to 1000.
+```{r}
+fish_mean_bt=resamp(fish_density,"bootstrap",mean)
+boot_fish_mean=resamp.result(fish_mean_bt,"bootstrap")
+copepod_mean_bt=resamp(copepod_density,"bootstrap",mean)
+boot_copepod_mean=resamp.result(copepod_mean_bt,"bootstrap")
+```
+
+### Compare estimations for the mean of fish density using normal theory, bootstrap, and jackknife
+```{r}
+fish_resamp_mean=cbind(jk_fish_mean_result,boot_fish_mean)
+kable(fish_resamp_mean,digits=2,caption="Comparison of normal theory, bootstrap and jackknife for fish density mean")
+
+samp.plot(fish_mean_jk,fish_mean_bt,title="Jackknife and bootstrap samples of fish density mean",xlab="Fish density")
+```
+
+### Compare estimations for the mean of copepod density using normal theory, bootstrap, and jackknife
+```{r}
+copepod_resamp_mean=cbind(jk_copepod_mean_result,boot_copepod_mean)
+kable(copepod_resamp_mean,digits=2,caption="Comparison of normal theory, bootstrap and jackknife for copepod density mean")
+
+samp.plot(copepod_mean_jk,copepod_mean_bt,title="Jackknife and bootstrap samples of copepod density mean",xlab="Copepod density")
+```
+
+### Bootstrap for coefficients in linear model $Fish = \beta_0+\beta_1 \times Copepod$
+Conduct bootstrap on coefficients $\beta_0$, $\beta_1$ using the `lm.resamp` function created above
+```{r}
+lm_bt=lm.resamp(fish_density,copepod_density,"bootstrap")
+boot_B0=resamp.result(lm_bt[,1],"bootstrap")
+boot_B1=resamp.result(lm_bt[,2],"bootstrap")
+```
+
+### Compare estimations for coefficient $\beta_0$ using normal theory, bootstrap, and jackknife 
+```{r}
+result_lm_B0=cbind(nor_B[,1],jk_lm_B0,boot_B0)
+colnames(result_lm_B0)[1] <- "Normal theory"
+kable(result_lm_B0,digits=2,caption="Comparison of normal theory, bootstrap and jackknife for coefficient B0")
+
+# compare histogram of jackknife and bootstrap samples
+samp.plot(lm_jk[,1],lm_bt[,1],title="Jackknife and bootstrap samples of coefficient B0",xlab="B0")
+```
+
+### Compare estimations for coefficient $\beta_1$ using normal theory, bootstrap, and jackknife
+```{r}
+result_lm_B1=cbind(nor_B[,2],jk_lm_B1,boot_B1)
+colnames(result_lm_B1)[1] <- "Normal theory"
+kable(result_lm_B1,digits=2,caption="Comparison of normal theory, bootstrap and jackknife for coefficient B1")
+
+# compare histogram of jackknife and bootstrap samples
+samp.plot(lm_jk[,2],lm_bt[,2],title="Jackknife and bootstrap samples of coefficient B1",xlab="B1")
+```
