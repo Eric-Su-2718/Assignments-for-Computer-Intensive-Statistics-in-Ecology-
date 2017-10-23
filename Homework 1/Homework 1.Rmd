@@ -1,0 +1,97 @@
+---
+title: "HW #1 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/3/2"
+output: html_document
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+### Load package
+```{r}
+library(knitr)
+```
+
+## 1. Calculate the copepod density for each species for each cruise-station
+
+### Import data
+```{r}
+species <- read.table("copepod_composition.txt",header = T) #import copepod data
+dens <- as.vector(read.table("cop_density.txt",header = T)[[1]]) # import density data
+```
+
+### Data manipulation
+```{r}
+#convert species frequency into percentage
+species = species / 100
+
+#calculate copepod density for each species for each cruise station
+species.density = t(apply(species, 1, function(x) x * dens))
+
+kable(t(head(species.density)), digits = 3, col.names = 1:6)
+
+```
+
+## 2. For each cruise-station, calculate the species richness (number of species) and Shannon diversity index
+
+```{r}
+#calculate number of species in each cruise station
+species_number = apply(species, 2, function(x) length(x[x > 0]))
+kable(species_number, col.names = "Number of species")
+
+#calculate Shannon diversity index for each cruise station
+Shannon_index = apply(species, 2, function(x) - sum(x * log(x), na.rm = T))
+kable(Shannon_index, col.names = "Shannon diversity index", digits = 2)
+```
+
+## 3. Find dominant species (species >=2% of total composition in any cruise-station) and calculate the average density for the spring, summer, and winter cruise for each dominant species.
+
+### Find dominant species in spring
+```{r}
+#find dominant species in each station during spring
+p.dom = apply(species[, 1:10] >= 0.02, 2, function(x) which(x == TRUE))
+p.dom.species = sort(unique(unlist(p.dom)))
+
+#calculate average density for each spring dominant species during each season
+p.dom.spring = apply(species.density[p.dom.species, 1:10 ], 1, mean)
+p.dom.summer = apply(species.density[p.dom.species, 11:25], 1, mean)
+p.dom.winter = apply(species.density[p.dom.species, 26:34], 1, mean)
+p.dom.result = cbind(p.dom.spring, p.dom.summer, p.dom.winter)
+rownames(p.dom.result) = p.dom.species
+
+#show density of spring dominant species in each season
+kable(p.dom.result, col.names = c("Spring", "Summer", "Winter"), caption = "Density of spring dominant species", digits = 3)
+```
+
+### Find dominant species in summer
+```{r}
+#find dominant species in each station during summer
+s.dom=apply(species[,11:25]>=0.02,2,function(x) which(x==TRUE))
+s.dom.species=sort(unique(unlist(s.dom)))
+
+#calculate average density for each summer dominant species during each season
+s.dom.spring=apply(species.density[s.dom.species,1:10],1,mean)
+s.dom.summer=apply(species.density[s.dom.species,11:25],1,mean)
+s.dom.winter=apply(species.density[s.dom.species,26:34],1,mean)
+s.dom.result=cbind(s.dom.spring, s.dom.summer, s.dom.winter)
+rownames(s.dom.result) = s.dom.species
+
+#show density of summer dominant species in each season
+kable(s.dom.result, col.names = c("Spring", "Summer", "Winter"), caption = "Density of summer dominant species", digits = 3)
+```
+
+### Find dominant species in Winter
+```{r}
+#find dominant species in each station during winter
+w.dom=apply(species[,26:34]>=0.02,2,function(x) which(x==TRUE))
+w.dom.species=sort(unique(unlist(w.dom)))
+
+#calculate average density for each winter dominant species during each season
+w.dom.spring=apply(species.density[w.dom.species,1:10],1,mean)
+w.dom.summer=apply(species.density[w.dom.species,11:25],1,mean)
+w.dom.winter=apply(species.density[w.dom.species,26:34],1,mean)
+w.dom.result=cbind(w.dom.spring, w.dom.summer, w.dom.winter)
+rownames(w.dom.result) = w.dom.species
+
+#show density of winter dominant species in each season
+kable(w.dom.result, col.names = c("Spring", "Summer", "Winter"), caption = "Density of winter dominant species", digits = 3)
+```
