@@ -1,0 +1,169 @@
+---
+title: "HW #10 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/5/4"
+output: html_document
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+### Load packages
+```{r message=FALSE}
+library(ggbiplot)
+library(vegan)
+library(cluster)
+```
+
+## Q. Use the ¡§dominant¡¨ copepod species data (from HW1). Apply PCA or MDS using matrix algebra to extract major gradients of the dominant species. Make a bi-plot to show the relationships among species and sites. Then, check your results with those from build-in functions of PCA, MDS, and NMDS.
+
+### Import data
+Import copepod data and extract dominant species data. Also extract group from the result of hierarchical clustering in [previous homework](http://rpubs.com/prorichter/267782).
+```{r}
+#import copepod data
+copdata = read.table("copepod_composition.txt", header = T)
+
+#import species name
+species_name <- read.table("copepodSPlist.txt", sep = "\t")
+
+#assign copepod species name
+rownames(copdata) <- as.character(unlist(species_name))
+
+#convert species frequency into percentage
+copdata = copdata / 100
+
+#find dominant species
+dom = apply(copdata >= 0.02, 2, which)
+dom = sort(unique(unlist(dom)))
+dom = t(copdata[dom, ])
+
+#calculate distance matrix
+dist_dom = vegdist(dom, method = "jaccard")
+
+#perform hierarchical clustring
+hc_dom = agnes(dist_dom, method = "ward")
+group = cutree(hc_dom, 3)
+group = factor(group, labels = c("Spring", "Summer", "Winter"))
+```
+
+### Conduct eigen analysis on dominant copepod data
+```{r}
+#eigen analysis on correlation matrix
+dom_eigen <- eigen(cor(dom))
+
+#extract pc loadings
+loading = dom_eigen$vectors
+rownames(loading) <- colnames(dom)
+
+#calculate pc scores
+score = scale(dom) %*% loading
+```
+
+### Determine number of PCs to keep
+```{r}
+var_expla = dom_eigen$values / sum(dom_eigen$values)
+plot(var_expla, type = "b")
+plot(cumsum(var_expla), type = "b")
+```
+
+It seems that the first 4 PCs explains most of the variance. 
+
+### Create bi-plot to visualize result
+```{r fig.width=15, fig.height=15}
+biplot(cbind(score[,1], score[,2]), loading[, 1:34], ylabs = colnames(dom), xlab = paste("PC1(", 100 * round(var_expla[1], 2), "%)", sep = "" ), ylab = paste("PC2(", 100 * round(var_expla[2], 2), "%)", sep = "" ))
+```
+
+### Loading plots {.tabset}
+
+Create loading plots to inspect copepods' effect on each PC.
+```{r results = "asis", fig.width=15, fig.height=15}
+for(i in 1:4){
+    cat("\n")
+    cat("#### ", "PC", i, "\n")
+    pc_load = loading[, i]
+    dotchart(pc_load[order(pc_load, decreasing = FALSE)], main = paste("Loading Plot for PC", i, sep = ""), xlab = "Variable Loadings", col = "blue")
+    cat("\n")
+}
+```
+
+### PCA
+Conduct PCA using build-in function `prcomp`
+```{r}
+dom_pca <- prcomp(dom, scale. = T)
+```
+
+### Visulize PCA results using bi-plot {.tabset}
+
+#### PCA bi-plot
+```{r fig.width=15, fig.height=15}
+biplot(dom_pca)
+```
+
+#### Compare with matrix algebra result
+Since the +/- sign of the PCs is arbitrary, we can reverse them without distorting the results. This graph is made after reversing the +/- of eigen vectors.
+```{r fig.width=15, fig.height=15}
+biplot(cbind(-score[, 1], -score[, 2]), -loading[, 1:34], ylabs = colnames(dom), xlab = paste("PC1(", 100 * round(var_expla[1], 2), "%)", sep = "" ), ylab = paste("PC2(", 100 * round(var_expla[2], 2), "%)", sep = "" ))
+```
+
+###
+
+The two bi-plots are very similar, indicating that we have done the eigen analysis correctly.
+
+### Add group to graph
+In this bi-plot, groups from hierarchical clustering are added and also a prettier graph is used
+```{r  fig.width=15, fig.height=15}
+ggbiplot(dom_pca, obs.scale = 1, var.scale = 1, ellipse = TRUE, groups = group,
+         circle = TRUE) +
+    scale_color_discrete(name = '') +
+    theme(legend.direction = 'horizontal', legend.position = 'top') +
+    theme_bw()
+```
+
+We can see that the first two principle components seperates summer from the other seasons but does not seperates spring and winter too well.
+
+### Other unconstrained ordination methods {.tabset}
+
+#### MDS
+Conduct MDS using build-in function `cmdscale`
+```{r warning=F}
+dom_mds <- cmdscale(dist(dom), k = 4, eig = T)
+dom_mds$points
+
+#visulize result
+ordiplot(dom_mds)
+```
+
+
+#### CA
+Conduct CA using build-in function `cca`
+```{r}
+dom_ca <- cca(dom)
+summary(dom_ca)
+
+#Visulize CA result
+ordiplot(dom_ca) 
+```
+
+#### DCA
+Conduct DCA using build-in function `decorana`
+```{r}
+dom_dca = decorana(dom)
+summary(dom_dca)
+
+#Visulize DCA result
+ordiplot(dom_dca, color = group) 
+```
+
+#### NMDS
+Conduct NMDS using build-in function `metaMDS`
+```{r}
+dom_nmds = metaMDS(dom, trace = F, k = 4)
+stressplot(dom_nmds)
+dom_nmds$points
+dom_nmds$species
+
+#Visulize NMDS result
+ordiplot(dom_nmds) 
+```
+
+
+
+
