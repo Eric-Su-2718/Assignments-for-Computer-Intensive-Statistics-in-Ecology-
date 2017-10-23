@@ -1,0 +1,223 @@
+---
+title: 'HW #5 Computer Intensive Statistics in Ecology'
+author: "─меDй╢ Eric Su"
+date: "2017/3/16"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+## Load packages 
+Load `knitr` for better report quality with markdown
+```{r}
+library(knitr)
+```
+
+***
+## 1. Compute the regression coefficients for $fish = г]0+г]1*copepod$ and using bootstrap method to calculate the 95% confidence limits of г]1 and test whether г]1 is significantly different from 0 (with bootstrap 1000 times). Please calculate the CL using three methods: percentile, BC and BCa methods.
+
+
+### Import data
+Import data set `enviANDdensity` and extract density data of fish and copepod from the data set
+```{r}
+enviANDdensity <- read.table("enviANDdensity.txt", header = T)
+fish_density = as.matrix(enviANDdensity[,11])
+copepod_density = as.matrix(enviANDdensity[,12])
+
+# display a part of the data
+kable(head(cbind(fish_density, copepod_density)), digits=2, col.names = c("Fish density","Copepod density"), align = "l", caption = "Fish and copepod density data (partial)")
+```
+
+
+### Function to generate jackknife or bootstrap samples for coefficients in a model
+Define function `lm.resamp` to generate samples for coefficients in a linear regression model for given dependent and independent variables
+```{r}
+lm.resamp <- function(dv, iv, method, boot_n = 1000) {
+    B_sample = numeric()
+    sampsize = length(dv)
+    
+    #generate jackknife samples for coefficients in a linear regression model
+    if (method == "Jackknife" | method == "jackknife") {
+        resamp_size = sampsize
+            for (i in 1:resamp_size) {
+            samp = as.matrix(cbind(dv, iv))[-i,]
+            Y = samp[, 1]
+            X = cbind(rep(1, length(samp[, 1])), samp[,-1])
+            beta = solve(t(X) %*% X) %*% (t(X) %*% Y)
+            B_sample = append(B_sample, beta)
+            }
+        }
+    #generate bootstrap samples for coefficients in a linear regression model
+    else if (method == "Bootstrap" | method == "bootstrap") {
+        resamp_size = boot_n
+            for (i in 1:boot_n) {
+            samp = as.matrix(cbind(dv, iv))[ceiling(runif(sampsize, 0, sampsize)), ]
+            Y = samp[, 1]
+            X = cbind(rep(1, length(samp[, 1])), samp[, -1])
+            beta = solve(t(X) %*% X) %*% (t(X) %*% Y)
+            B_sample = append(B_sample, beta)
+            }
+        } else{stop("Please define a resampling method")}
+    
+    #return samples for the coefficients
+    return(t(matrix(B_sample, dim(iv)[2] + 1, resamp_size)))
+}
+```
+
+### Function to calculate bootstrap CI for coefficients in linear model
+Define function `boot.ci` for calculating the confidence interval for given original data and bootstrap samples using either quantile, BC or BCa method.
+```{r}
+boot.ci <- function(origin_dv, origin_iv, boot_samp, coef = 1, level = 0.95, method = "quantile"){
+    
+    #get z-value for given confiden level
+    ci_limits = c((1 - level) / 2, 1 - (1 - level) / 2)
+    Z = qnorm(ci_limits)
+    
+    # Calculate the esimated coefficients 
+    # set dependent variable
+    Y = origin_dv
+    
+    #set intercept and independent variable
+    X = cbind(1, origin_iv)
+    
+    #compute coefficients
+    B = solve(t(X) %*% X) %*% (t(X) %*% Y)
+    
+    size = length(boot_samp)
+    sort_samp = sort(boot_samp)
+    
+    #calculate confidence interval using different methods
+    if(method == "Quantile" | method == "quantile"){
+        boot_CI = sort_samp[round(ci_limits * size)]
+    }
+    
+    else if(method == "BC"){
+        z_0 <- qnorm(sum(boot_samp < B[coef]) / size)
+        boot_CI <- sort_samp[round(pnorm(2 * z_0 + Z) * size)]
+    }
+    
+    else if(method == "BCa"){
+        # calculate acceleration
+        jack_samp = lm.resamp(origin_dv, origin_iv, "jackknife")[, coef]
+        a_hat = sum((mean(jack_samp) - jack_samp) ^ 3) / (6 * (sum((mean(jack_samp)         - jack_samp) ^ 2) ^ 1.5))
+        
+        z_0 = qnorm(sum(boot_samp < B[coef]) / size)
+        boot_CI = sort_samp[round(pnorm(z_0 + (z_0 + Z) / (1 - a_hat * Z)) * size)]
+    } else{stop("Please define a method to calculate bootstrap confidence interval")}
+    
+    boot_CI = as.matrix(c(B[coef], boot_CI))
+    colnames(boot_CI) = method
+    rownames(boot_CI) = c("Estimated parameter", paste(ci_limits[1] * 100, 
+    "% lower limit"), paste(ci_limits[2] * 100, "% upper limit"))
+    
+    return(t(boot_CI))
+}
+```
+
+### Calculate and report bootstrap CI for using methods: quantile, BC and BCa
+```{r}
+lm_bt = lm.resamp(fish_density, copepod_density, "bootstrap")
+lm_B1_quan = boot.ci(fish_density, copepod_density, lm_bt[,2], coef = 2, method = "Quantile")
+lm_B1_BC = boot.ci(fish_density, copepod_density, lm_bt[,2], coef = 2, method = "BC")
+lm_B1_BCa = boot.ci(fish_density, copepod_density, lm_bt[,2], coef = 2, method = "BCa")
+lm_B1 = rbind(lm_B1_quan, lm_B1_BC, lm_B1_BCa)
+kable(lm_B1, digits = 2, align = "r", caption = "Confidence intervals for the bootstrapped coefficient г]1")
+```
+
+Coefficient г]1 is significantly different from 0 when using method(s): `r rownames(lm_B1)[lm_B1[,2] > 0 | lm_B1[,3] < 0 ]`
+
+***
+## 2. Bootstrap test whether significant difference exists between the density of Oncaea Venusta and Canthocalanus pauper, using $CI = \hat{\theta^{*}_1}-\hat{\theta^{*}_2}$ and BCa. (Assume each station is independent and use all 34 stations.)
+
+
+### Import data
+Import data `copepod_composition.txt`, `cop_density.txt` and `copepodSPlist.txt` for analysis
+```{r}
+#import copepod data
+species <- read.table("copepod_composition.txt", header = T)
+
+#import density data
+dens <- as.vector(read.table("cop_density.txt", header = T)[[1]])
+
+#import species name
+species_name <- read.table("copepodSPlist.txt", sep = "\t")
+```
+
+### Extract Oncaea Venusta and Canthocalanus pauper data
+```{r}
+#convert species frequency into percentage
+species = species/100
+
+#calculate copepod density for each species for each cruise station
+species.density = t(apply(species, 1, function(x) x*dens))
+
+#extract the density of Oncaea Venusta and Canthocalanus pauper
+OV = species.density[grep("Oncaea venusta", species_name[, 1]), ]
+CP = species.density[grep("Canthocalanus pauper", species_name[, 1]), ]
+
+#show partial data
+kable(head(cbind(OV, CP)), digits = 2, col.names = c("Oncaea Venusta", "Canthocalanus pauper"), align = "l", caption = "Oncaea Venusta and Canthocalanus pauper density data (partial)")
+```
+
+### Function to generate bootstrap or jackknife samples for difference between two parameter
+Define function `resamp_2samp` for generating bootstrap or jackknife samples for the difference between two sample
+```{r}
+resamp_2samp <- function(data1, data2, method, stat=mean, boot_n = 1000){
+    FUN = match.fun(stat)
+    size1 = length(data1)
+    size2 = length(data2)
+    
+    if(method == "Jackknife" | method == "jackknife"){
+        difference = numeric()
+        for(i in 1:size1){
+            difference[i] = FUN(data1[-i]) - FUN(data2[-i])
+        }
+    }
+    else if(method == "Bootstrap" | method == "bootstrap"){
+        
+        #create and randomize n sets of bootstrap samples
+        shuffle1 = order(runif(size1 * boot_n))
+        shuffle2 = order(runif(size1 * boot_n))
+        theta1_boot = rep(data1, boot_n)[shuffle1]
+        theta2_boot = rep(data2, boot_n)[shuffle2]
+        
+        #split bootstrap samples and calculate the statistic of interest for each set
+        boot1 = apply(matrix(theta1_boot, size1, boot_n), 2, FUN)
+        boot2 = apply(matrix(theta2_boot, size2, boot_n), 2, FUN)
+        difference = boot1 - boot2
+    }else{stop("Please define a resampling method")}
+        
+    return(difference)
+}
+```
+
+### Generate bootstrap samples for $\hat{\theta^{*}_1}-\hat{\theta^{*}_2}$
+```{r}
+boot_2samp = sort(resamp_2samp(OV, CP, "bootstrap", mean))
+```
+
+### Calculate the 95% confidence interval for the bootstrapped $\hat{\theta^{*}_1}-\hat{\theta^{*}_2}$ using BCa method
+```{r}
+level = 0.95
+ci_limits = c((1 - level) / 2, 1 - (1 - level) / 2)
+Z = qnorm(ci_limits)
+
+# calculate acceleration
+jack_2samp = resamp_2samp(OV, CP, "jackknife", mean)
+a_hat = sum((mean(jack_2samp) - jack_2samp) ^ 3) / (6 * (sum((mean(jack_2samp) - jack_2samp) ^ 2) ^ 1.5))
+        
+z_0 = qnorm(sum(boot_2samp < (mean(OV) - mean(CP))) / length(boot_2samp))
+boot_CI = boot_2samp[round(pnorm(z_0 + (z_0 + Z) / (1 - a_hat * Z)) * length(boot_2samp))]
+```
+
+### Report whether the estimated $\hat{\theta^{*}_1}-\hat{\theta^{*}_2}$ is significantly different from 0
+```{r}
+if(boot_CI[1] > 0 | boot_CI[2] < 0){
+    result = "does"
+} else{
+    result = "does not"
+}
+```
+The `r level * 100`% confidence interval for $\hat{\theta^{*}_1}-\hat{\theta^{*}_2}$ is (`r round(boot_CI, 2)`). Therefore, we conclude that significant difference `r result` exist between the density of Oncaea Venusta and Canthocalanus pauper.
