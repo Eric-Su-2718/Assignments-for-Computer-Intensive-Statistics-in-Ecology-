@@ -1,0 +1,288 @@
+---
+title: "HW #15 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/6/6"
+output: html_document
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+The von Bertalanffy growth function is used to describe body length of fish as a function of its age. It is defined as $L(t) = L_{\infty}(1 - e^{- K(t - t_0)})$ where $L_{\infty}$ is the hypothesized (mean) maximum length, $K$ is growth rate, $t$ is current age and $t_0$ is the hypothesized age when body length is 0.
+
+In this assignment, we try to model body length of fish using the following regression model: $L(t) = L_{\infty}(1 - e^{-K(t - t_0)}) * e^{\epsilon}$ with $\epsilon$ ~ $N(0, \sigma^2)$. Parameters will be estimated using the Markov chain Monte Carlo (MCMC) method with priors $L_{\infty}$ ~ $U(40, 100)$ and $K$ ~ $U(0.1, 0.6)$.
+
+## Q. Assume $t_0=0$ (two parameters). Please estimate the posterior distributions of parameters using the method Sample-importance-resampling (SIR) or Markov chain Monte Carlo (MCMC) for the average length-at-age for the female Pacific Hake (obs. sigma=0.1), considering a multiplicative error model with log-normal distribution.
+
+### Load package
+```{r message=FALSE}
+library(knitr)
+library(ggplot2)
+library(ggmcmc)
+library(coda)
+library(R2OpenBUGS)
+```
+
+### Load data
+```{r}
+age = c(1, 2, 3.3, 4.3, 5.3, 6.3, 7.3, 8.3, 9.3, 10.3, 11.3, 12.3, 13.3)
+Length = c(15.4, 28.03, 41.18, 46.2, 48.23, 50.26, 51.82, 54.27, 56.98, 58.93, 59, 60.91, 61.83)
+
+#show data
+kable(cbind(age, Length), col.names = c("Age (year)", "Female mean length (cm)"))
+```
+
+### Explore the relationship between body length and age
+```{r}
+#prepare data for plotting
+dataset = data.frame(age, Length)
+colnames(dataset) <- c("Age", "Body length")
+
+#draw graph
+ggplot(dataset, aes(x = Age, y = `Body length`)) +
+    geom_point()
+```
+
+It seems that growth rate declines as age increases and the von Bertalanffy growth function is appropriate.
+
+### The von Bertalanffy growth function
+Define function `VBGF` that calculates estimated length using the von Bertalanffy growth function, which would be used in our regression model. The parameter $t_0$ would be set to 0.
+```{r}
+VBGF <-function(x, Linf, K){
+    y = Linf * (1 - exp(- K * (x - 0)))
+    return(y)
+}
+```
+
+### Log-likelihood function for the regression
+Define function `lognormal_like` which calculates the total likelihood of the regression model. The parameter sigma would be set to 0.1.
+```{r}
+lognormal_like = function(Linf, K){
+    
+    like = numeric(length(Length))
+    NLL = numeric(length(Length))
+    ypred = VBGF(age, Linf, K)
+    dev2 =(log(Length) - log(ypred)) ^ 2
+    sigma = 0.1
+    
+    for (i in 1:length(Length)){
+        like[i] = (1 / (age[i] * sqrt(2 * pi) * sigma)) * exp(-dev2[i] / (2 * sigma ^ 2))
+        NLL[i] = -log(like[i])
+    }
+    
+    tot_like = exp(-sum(NLL))
+    return(list(ypred = ypred, tot_like = tot_like, NLL = sum(NLL)))
+}
+```
+
+### MCMC function
+Define function `MCMC` that conducts Markov chain Monte Carlo algorithm to sample from the posterior distribution. Prior distributions for our parameters are: $L_{\infty}$ ~ $U(40, 100)$ and $K$ ~ $U(0.1, 0.6)$
+```{r}
+MCMC<-function(Xinit, Ndim, Nsim = 1000, Nburn = 0, Nthin = 1){  
+    Linf_jump_max = 40
+    Linf_jump_min = -40
+    
+    K_jump_max = 0.05
+    K_jump_min = -0.05
+    
+    Xcurr <- Xinit
+    Fcurr <- -1 * lognormal_like(Linf = Xcurr[1], K = Xcurr[2])$NLL
+    Outs2 <- matrix(-9999, nrow = (Nsim - Nburn), ncol = (Ndim + 1))
+    Ipnt <- 0; Icnt <- 0
+    for(Isim in 1:Nsim){ 
+        Xnext = NULL
+        Xnext[1] = Xcurr[1] + runif(1, 0, 1) * (Linf_jump_max - Linf_jump_min) + Linf_jump_min 
+        Xnext[2] = Xcurr[2] + runif(1, 0, 1) * (K_jump_max - K_jump_min) + K_jump_min
+        
+        #adjust the next value of Linf for its prior distribution
+        while(Xnext[1] > 100 | Xnext[1] < 40){
+            Xnext[1] = Xcurr[1] + runif(1, 0, 1) * (Linf_jump_max - Linf_jump_min) + Linf_jump_min
+        }
+        
+        #adjust the next value of K for its prior distribution
+        while(Xnext[2] > 0.6 | Xnext[1] < 0.1){
+            Xnext[2] = Xcurr[2] + runif(1, 0, 1) * (K_jump_max - K_jump_min) + K_jump_min
+        
+        }
+        
+        Fnext <- -1 * lognormal_like(Linf = Xnext[1], K = Xnext[2])$NLL
+        ratio <- exp(-Fcurr + Fnext)
+        
+        #accept proposed draw if likelihood is higher, or accept it with probability of the ratio of likelihoods
+        if(Fnext > Fcurr){
+            Fcurr <- Fnext; Xcurr <- Xnext
+        } else if(ratio > runif(1, 0, 1)){Fcurr <- Fnext; Xcurr <- Xnext}
+        if(Isim %% Nthin == 0){
+            Ipnt <- Ipnt + 1
+            if (Ipnt > Nburn){
+                Icnt <- Icnt + 1; Outs2[Icnt, ] <- c(Xcurr, Fcurr)
+            }
+        }
+    }
+    return(Outs2[1:Icnt,])
+}
+```
+
+### Conduct MCMC using self-defined function
+We take 30000 samples with 100 burn-in and thin every 10 samples, resulting in a total of 2900 valid samples.
+```{r}
+posterior <- MCMC(Xinit = c(100, 0.1), Ndim = 2, Nsim = 30000, Nburn = 100, Nthin = 10)
+colnames(posterior) <- c("L[infinity]", "K", "NLL")
+```
+
+### Summary of parameters estimated using MCMC
+```{r}
+posterior = as.mcmc(posterior[, 1:2])
+summary(posterior)
+
+#highest posterior density 95% interval
+HPDinterval(posterior, prob = 0.95)
+```
+
+### Plot results and diagnostic plots for the parameter samples from MCMC {.tabset}
+using the `ggmcmc` package, we draw various plots to show the results of MCMC and also conduct convergence diagnosis.
+```{r}
+MC_posterior = ggs(posterior)
+```
+
+#### Density plots
+```{r}
+ggs_density(MC_posterior, greek = T)
+```
+
+#### Trace plots
+```{r}
+ggs_traceplot(MC_posterior, greek = T)
+```
+
+We can see that sample values of the parameters are able to "jump" freely and do not show any obvious patterns.
+
+#### Autocorrelation plots
+```{r}
+ggs_autocorrelation(MC_posterior, greek = T)
+```
+
+Autocorrelation decreases to nearly 0 after sufficient lag.
+
+#### Running mean plots
+```{r message=FALSE}
+ggs_running(MC_posterior, greek = T) + scale_color_discrete(guide = F)
+```
+
+Mean of our sample values(=estimated value of the parameter) approaches the final result  quickly, indicating convergence of the parameters.
+
+#### Cross-correlation plots
+```{r}
+pset <- data.frame(posterior[, 2], posterior[, 1])
+colnames(pset) <- c("K", "Linf")
+ggplot(pset, aes(x = K, y = Linf)) +
+    geom_point(alpha = 0.3) +
+    labs(title = "Scatterplot of parameters' MCMC samples", y = expression(L[infinity]))
+
+ggs_crosscorrelation(MC_posterior, greek = T) + scale_color_discrete(name = "Correlation")
+```
+
+Our parameters correlates highly with each other, thus a large MCMC sample size is chosen to decrease effects of correlation on our results.
+
+### Use OpenBUGS to conduct MCMC
+Previously, I learned  OpenBUGS in another course and would like to conduct MCMC using the software. OpenBUGS offers a more intuitive modelling procedure and I can also test out different initial values using multiple chains with ease.
+```{r message=FALSE}
+my.data <- list("age","Length")
+model = function(){
+    for(i in 1:13){
+        Length[i] ~ dlnorm(mu[i], 100)
+        mu[i] <- log(Linf * (1 - exp(- K * (age[i] - 0))))
+    }
+    Linf ~ dunif(40, 100)
+    K ~ dunif(0.1, 0.6)
+}
+my.model.file <- "model_VBGF.odc" 
+write.model(model, con = my.model.file)
+
+params <- c("Linf","K")
+inits <- function(){  
+    list(Linf = 100, K = 0.1
+    )
+}
+out <- bugs(data = my.data, inits = NULL, parameters.to.save = params, 
+            model.file = my.model.file, codaPkg = T, n.iter = 30000, n.chains = 3, 
+            n.burnin = 100, n.thin = 10, DIC = T)
+VBGF_out <- read.bugs(out, quiet = T)
+VBGF_out <- VBGF_out[,-3]
+colnames(VBGF_out[[1]]) <- c("K", "L[infinity]")
+colnames(VBGF_out[[2]]) <- c("K", "L[infinity]")
+colnames(VBGF_out[[3]]) <- c("K", "L[infinity]")
+```
+
+### Summary of parameters estimated using OpenBUGS
+```{r}
+summary(VBGF_out)
+
+#highest posterior density 95% interval
+HPDinterval(VBGF_out, prob = 0.95)
+```
+
+### Plot results and diagnostic plots for for results from OpenBUGS {.tabset}
+using the `coda` and `ggmcmc` package, we create various plots to show results of MCMC and also conduct convergence diagnosis.
+```{r}
+bugs_posterior = ggs(VBGF_out)
+```
+
+#### Density plots
+```{r}
+ggs_density(bugs_posterior, greek = T)
+```
+
+#### Trace plots
+```{r}
+ggs_traceplot(bugs_posterior, greek = T)
+```
+
+#### Autocorrelation plots
+```{r}
+ggs_autocorrelation(bugs_posterior, greek = T)
+```
+
+#### Running mean plots
+```{r message=FALSE}
+ggs_running(bugs_posterior, greek = T)
+```
+
+#### Cross-correlation plots
+```{r}
+pset <- data.frame(as.vector(VBGF_out[[1]][,1]), as.vector(VBGF_out[[1]][,2]))
+colnames(pset) <- c("K", "Linf")
+ggplot(pset, aes(x = K, y = Linf)) +
+    geom_point(alpha = 0.05) +
+    labs(title = "Scatterplot of parameters' MCMC samples", y = expression(L[infinity]))
+
+ggs_crosscorrelation(bugs_posterior, greek = T) + scale_color_discrete(name = "Correlation")
+```
+
+Our parameters correlates highly with each other, thus a large MCMC sample size is chosen to decrease effects of correlation on our results.
+
+#### Gelman plots
+```{r}
+gelman.plot(VBGF_out)
+```
+
+According to the Gelman plots, shrink factor for both parameters converges to 1, indicating good convergence of our model.
+
+###
+
+The results from OpenBUGS are fairly similar to those using our self-defined function. Moreover, different chains with different random initial values also yield very similar results.
+
+### Visualize estimations of regression model
+```{r}
+par = summary(VBGF_out)$statistics[, 1]
+pred_VBGF = VBGF(seq(from = min(age), to = max(age), length.out = 100), Linf = par[2], K = par[1])
+
+#prepare data for plotting
+dataset = data.frame(seq(from = min(age), to = max(age), length.out = 100), pred_VBGF, c(rep("VBGF", 100)))
+colnames(dataset) <- c("Age", "Esimated length", "Model")
+
+#draw graph
+ggplot() +
+    geom_line(aes(x = dataset$Age, y = dataset$`Esimated length`, col = dataset$Model)) +
+    scale_color_discrete(name = "Model") +
+    labs(title = "Regression model using von Bertalanffy and Gompertz growth function", x = "Age", y = "Fish length") +
+    geom_point(aes(x = age, y = Length))
+```

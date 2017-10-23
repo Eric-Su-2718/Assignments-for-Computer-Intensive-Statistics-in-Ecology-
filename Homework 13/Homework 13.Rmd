@@ -1,0 +1,335 @@
+---
+title: "HW #13 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/5/23"
+output: html_document
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+There are many functions that try to describe growth, in this assignment we would model our data using the von Bertalanffy and Gompertz growth function.
+
+The von Bertalanffy growth function assumes a linear decrease in growth rate. It is defined as $L(t) = L_{\infty}(1 - e^{- K(t - t_0)})$ where $L_{\infty}$ is the hypothesized (mean) maximum length, $K$ is growth rate, $t$ is current age and $t_0$ is the hypothesized age when body length is 0. 
+
+The Gompertz growth function assumes a exponential decrease in growth rate. It is defined as $L(t) = L_{\infty} * e^{-e^{- K_2(t - \frac{ln(\lambda) - ln(K_2))}{K_2})})}$ where $L_{\infty}$ is the hypothesized (mean) maximum length, $K_2$ is the rate of exponential decrease of the relative growth rate with age, $t$ is current age and $\lambda$ is the theoretical initial relative growth rate at zero age.
+
+We would try to model body length of fish using regression models with multiplicative log-normal errors for both functions described above: $L(t) = Function * e^{\epsilon}$ with $\epsilon$ ~ $N(0, \sigma^2)$ and estimate the parameters using maximum likelihood estimators (MLE). Afterwards, we estimate the 95% confidence interval for model parameters and compare the goodness of fit using AICc and also find an average model using AIC weights.
+
+### Load package
+```{r}
+library(knitr)
+library(ggplot2)
+```
+
+### Load data
+```{r}
+data = read.csv("DATA_atlantic croaker.csv")
+
+#keep only female data
+data = subset(data, Sex == "F")[, -3]
+
+#show a part of data
+kable(head(data), row.names = F, caption = "Age and body length data of female Atlantic Croaker (partial)")
+```
+
+## Q1. Estimate the model parameters of two different growth functions (VBGF; Gompertz) using the method maximum likelihood for the length-at-age for female Atlantic Croaker (Micropogonias undulatus), considering a multiplicative error model with log-normal distribution
+
+### Explore the relationship between body length and age
+```{r}
+#prepare data for plotting
+dataset = data
+colnames(dataset) <- c("Age", "Body length")
+
+#draw graph
+ggplot(dataset, aes(x = Age, y = `Body length`)) +
+    geom_point()
+```
+
+Since age is theoretically a continuous variable, let's add a bit of jittering(noise) to simulate values for non-integer ages.
+```{r}
+ggplot(dataset, aes(x = Age, y = `Body length`)) +
+    geom_jitter()
+```
+
+It does seem that growth rate declines as age increases.
+
+### The von Bertalanffy growth function
+Define function `VBGF` that calculates estimated length using the von Bertalanffy growth function.
+```{r}
+VBGF <-function(x, Linf = theta[1], K = theta[2], t0 = theta[3], theta = c(Linf, K, t0)){
+    y = Linf * (1 - exp(- K * (x - t0)))
+    return(y)
+}
+```
+
+### The Gompertz growth function
+Define function `Gomp` that calculates estimated length using the Gompertz growth function.
+```{r}
+Gomp <-function(x, Linf = theta[1], K2 = theta[2], lambda = theta[3], theta = c(Linf, K2, lambda)){
+    y = Linf * exp(- exp(- K2 * (x - (log(lambda) - log(K2)) / K2)))
+    return(y)
+}
+```
+
+### Log-likelihood function for the regression
+Define function `lognormal_like` which calculates the log-likelihood based on a multiplicative model with log-normal error
+```{r}
+lognormal_like = function(x, y, FUN, Out, ...){
+    
+    FUN = match.fun(FUN)
+    like = numeric(length(y))
+    NLL = numeric(length(y))
+    ypred = FUN(x, ...)
+    dev2 =(log(y) - log(ypred)) ^ 2
+    sigma = sqrt(mean(dev2))
+    
+    for (i in 1:length(y)){
+        like[i] = (1 / (x[i] * sqrt(2 * pi) * sigma)) * exp(-dev2[i] / (2 * sigma ^ 2))
+        NLL[i] = -log(like[i])
+    }
+    
+    #show each iteration if Out is set as TRUE
+    if(Out == T) cat("NLL=", sum(NLL), " Linf=", Linf, " K=", K, " t0=", t0, "\n", sep = "")
+    
+    #calculate various informations about the log-likelihood
+        Outs <- NULL
+        Outs$Pred <- ypred
+        Outs$Length <- y
+        Outs$Dev2 <- dev2
+        Outs$sigma <- sigma
+        Outs$Like <- like
+        Outs$NLL <- NLL 
+        Outs$Obj <- sum(NLL)
+        
+    return(Outs)
+}
+```
+
+### Define objective function: sum of negative log-likelihood
+```{r}
+obj_function = function(theta, ...){ 
+    Outs <- lognormal_like(theta = theta, ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+```
+
+### Find the MLE of parameters
+Using optimization method, we try to find values of the three parameters ($L_{\infty}, K, t_0$) that maximizes the likelihood function (=minimize negative log-likelihood function) for our regression model.
+```{r warning=FALSE}
+model_VBGF = optim(c(max(data[, 2]), 0.7, 0), obj_function, FUN = VBGF, x = data[, 1], y = data[ ,2], Out = F, hessian = T)
+model_Gomp = optim(c(max(data[, 2]), 0.3, 0.2), obj_function, FUN = Gomp, x = data[ ,1], y = data[ ,2], Out = F, hessian = T)
+```
+
+### Display model results
+```{r}
+param_VBGF <- model_VBGF$par
+param_Gomp <- model_Gomp$par
+sd_VBGF <- sqrt(diag(solve(model_VBGF$hessian)))
+sd_Gomp <- sqrt(diag(solve(model_Gomp$hessian)))
+model_result_VBGF <- cbind(param_VBGF, sd_VBGF)
+model_result_Gomp <- cbind(param_Gomp, sd_Gomp)
+rownames(model_result_VBGF) <- c("L inf", "K", "t0")
+rownames(model_result_Gomp) <- c("L inf", "K2", "Lambda")
+
+kable(model_result_VBGF, col.names = c("Estimated parameters", "Standard deviation"), caption = "Model using von Bertalanffy growth function", digits = 3)
+```
+
+Regression model using the von Bertalanffy growth function:
+$L(t) = 432.38(1 - e^{- 0.24(t + 1.98)})$
+```{r}
+kable(model_result_Gomp, col.names = c("Estimated parameters", "Standard deviation"), caption = "Model using Gompertz growth function", digits = 3)
+```
+
+Regression model using the Gompertz growth function:
+$L(t) = 420.39 * e^{-e^{- 0.32(t - \frac{ln(0.28) - ln(0.32))}{0.32})})}$
+
+## Q2. Calculate the 95% confidence intervals for each parameter of the growth functions by using the likelihood profile method
+
+### Calculate negative log-likelihood for both models
+```{r}
+VBGF_like = lognormal_like(data[, 1], data[, 2], VBGF, theta = param_VBGF, Out = F)$Obj
+Gomp_like = lognormal_like(data[, 1], data[, 2], Gomp, theta = param_Gomp, Out = F)$Obj
+```
+
+### Find 95% confidence interval for von Bertalanffy model parameters using the likelihood profile method
+CI for $L_{\infty}$
+```{r}
+obj_fun = function(theta, ...){ 
+    Outs <- lognormal_like(K = theta[1], t0 = theta[2], ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+
+Linf_like = numeric()
+Linf_range = seq(from = param_VBGF[1] - 40, to = param_VBGF[1] + 100, length.out = 100)
+for(i in 1:100){
+        Linf_est = optim(param_VBGF[c(2, 3)], obj_fun, FUN = VBGF, Linf = Linf_range[i], x = data[, 1], y = data[ ,2], Out = F)$par
+        Linf_like[i] = 2 * (- VBGF_like + lognormal_like(data[, 1], data[, 2], VBGF, Linf =  Linf_range[i], K = Linf_est[1], t0 = Linf_est[2], Out = F)$Obj)
+}
+
+Linf_accept = which(Linf_like < qchisq(0.95, 1))
+Linf_ci = Linf_range[c(min(Linf_accept), max(Linf_accept))]
+
+```
+
+CI for $K$
+```{r warning=FALSE}
+obj_fun = function(theta, ...){ 
+    Outs <- lognormal_like(Linf = theta[1], t0 = theta[2], ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+
+K_like = numeric()
+K_range = seq(from = param_VBGF[2] - 0.15, to = param_VBGF[2] + 0.3, length.out = 100)
+for(i in 1:100){
+        K_est = optim(param_VBGF[c(1, 3)], obj_fun, FUN = VBGF, K = K_range[i], x = data[, 1], y = data[ ,2], Out = F)$par
+        K_like[i] = 2 * (- VBGF_like + lognormal_like(data[, 1], data[, 2], VBGF, K =  K_range[i], Linf = K_est[1], t0 = K_est[2], Out = F)$Obj)
+}
+
+K_accept = which(K_like < qchisq(0.95, 1))
+K_ci = K_range[c(min(K_accept), max(K_accept))]
+```
+
+CI for $t_0$
+```{r warning=FALSE}
+obj_fun = function(theta, ...){ 
+    Outs <- lognormal_like(Linf = theta[1], K = theta[2], ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+
+t0_like = numeric()
+t0_range = seq(from = param_VBGF[3] - 2.04, to = param_VBGF[3] + 2.04, length.out = 100)
+for(i in 1:100){
+        t0_est = optim(param_VBGF[c(1, 2)], obj_fun, FUN = VBGF, t0 = t0_range[i], x = data[, 1], y = data[ ,2], Out = F)$par
+        t0_like[i] = 2 * (- VBGF_like + lognormal_like(data[, 1], data[, 2], VBGF, t0 =  t0_range[i], Linf = t0_est[1], K = t0_est[2], Out = F)$Obj)
+}
+
+t0_accept = which(t0_like < qchisq(0.95, 1))
+t0_ci = t0_range[c(min(t0_accept), max(t0_accept))]
+```
+
+### Display von Bertalanffy model results with confidence interval
+```{r}
+model_result_VBGF = data.frame(model_result_VBGF, t(matrix(c(Linf_ci, K_ci, t0_ci), 2, 3)))
+
+kable(model_result_VBGF, col.names = c("Estimated parameters", "Standard deviation", "95% CI lower bound", "95% CI upper bound"), caption = "Model using von Bertalanffy growth function", digits = 3)
+```
+
+### Find 95% confidence interval for Gompertz model parameters using the likelihood profile method
+CI for $L_{\infty}$
+```{r}
+obj_fun = function(theta, ...){ 
+    Outs <- lognormal_like(K2 = theta[1], lambda = theta[2], ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+
+LGomp_like = numeric()
+LGomp_range = seq(from = param_Gomp[1] - 40, to = param_Gomp[1] + 80, length.out = 100)
+for(i in 1:100){
+        LGomp_est = optim(param_Gomp[c(2, 3)], obj_fun, FUN = Gomp, Linf = LGomp_range[i], x = data[, 1], y = data[ ,2], Out = F)$par
+        LGomp_like[i] = 2 * (- Gomp_like + lognormal_like(data[, 1], data[, 2], Gomp, Linf =  LGomp_range[i], K2 = LGomp_est[1], lambda = LGomp_est[2], Out = F)$Obj)
+}
+
+LGomp_accept = which(LGomp_like < qchisq(0.95, 1))
+LGomp_ci = LGomp_range[c(min(LGomp_accept), max(LGomp_accept))]
+
+```
+
+CI for $K_2$
+```{r warning=FALSE}
+obj_fun = function(theta, ...){ 
+    Outs <- lognormal_like(Linf = theta[1], lambda = theta[2], ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+
+K2_like = numeric()
+K2_range = seq(from = param_Gomp[2] - 0.20, to = param_Gomp[2] + 0.3, length.out = 100)
+for(i in 1:100){
+        K2_est = optim(param_Gomp[c(1, 3)], obj_fun, FUN = Gomp, K2 = K2_range[i], x = data[, 1], y = data[ ,2], Out = F)$par
+        K2_like[i] = 2 * (- Gomp_like + lognormal_like(data[, 1], data[, 2], Gomp, K2 =  K2_range[i], Linf = K2_est[1], lambda = K2_est[2], Out = F)$Obj)
+}
+
+K2_accept = which(K2_like < qchisq(0.95, 1))
+K2_ci = K2_range[c(min(K2_accept), max(K2_accept))]
+```
+
+CI for $\lambda$
+```{r warning=FALSE}
+obj_fun = function(theta, ...){ 
+    Outs <- lognormal_like(Linf = theta[1], K2 = theta[2], ...)
+    obj <- Outs$Obj
+    return(obj)
+}
+
+lambda_like = numeric()
+lambda_range = seq(from = param_Gomp[3] - 0.15, to = param_Gomp[3] + 0.50, length.out = 100)
+for(i in 1:100){
+        lambda_est = optim(param_Gomp[c(1, 2)], obj_fun, FUN = Gomp, lambda = lambda_range[i], x = data[, 1], y = data[ ,2], Out = F)$par
+        lambda_like[i] = 2 * (- Gomp_like + lognormal_like(data[, 1], data[, 2], Gomp, lambda =  lambda_range[i], Linf = lambda_est[1], K2 = lambda_est[2], Out = F)$Obj)
+}
+
+lambda_accept = which(lambda_like < qchisq(0.95, 1))
+lambda_ci = lambda_range[c(min(lambda_accept), max(lambda_accept))]
+```
+
+### Display Gompertz model results with confidence interval
+```{r}
+model_result_Gomp = data.frame(model_result_Gomp, t(matrix(c(LGomp_ci, K2_ci, lambda_ci), 2, 3)))
+
+kable(model_result_Gomp, col.names = c("Estimated parameters", "Standard deviation", "95% CI lower bound", "95% CI upper bound"), caption = "Model using Gompertz growth function", digits = 3)
+```
+
+## Q3. Conduct model selection based on the AICc and quantify the plausibility of each model by using ¡§Akaike weight ($w_i$)¡¨
+```{r}
+#calculate AICc for both models
+aicc_VBGF = 2 * VBGF_like + 2 * 3 + (2 * 3 * 4) / (204 - 3 - 1)
+aicc_Gomp = 2 * Gomp_like + 2 * 3 + (2 * 3 * 4) / (204 - 3 - 1)
+
+#find the best model with the lower AICc
+min_aicc = min(aicc_VBGF, aicc_Gomp)
+
+#calculate weights based on AICc
+aicc_change = c(aicc_VBGF, aicc_Gomp) - min_aicc
+weight = exp(-0.5 * aicc_change) / sum(exp(-0.5 * aicc_change))
+
+#show results of AICc and weights
+m_criterion = cbind(c(aicc_VBGF, aicc_Gomp), aicc_change, weight)
+rownames(m_criterion) <- c("von Bertalanffy", "Gompertz")
+colnames(m_criterion) <- c("AICc", "AICc change", "Weight")
+kable(m_criterion)
+```
+
+The model using the von Bertalanffy growth function is the better model based on AICc, but the difference is extremely small.
+
+## Q4. Estimate the average model based on $w_i$ and plot all the growth curves together
+
+### Average model
+Make predictions using the average model based on Akaike weight
+```{r}
+pred_VBGF = VBGF(seq(from = min(data[ ,1]), to = max(data[, 1]), length.out = 100), theta = param_VBGF)
+pred_Gomp = Gomp(seq(from = min(data[ ,1]), to = max(data[, 1]), length.out = 100), theta = param_Gomp)
+pred_ave = weight[1] * pred_VBGF + weight[2] * pred_Gomp
+```
+
+### Visualize estimations of regression model
+```{r}
+#prepare data for plotting
+dataset = data.frame(rep(seq(from = min(data[ ,1]), to = max(data[, 1]), length.out = 100), 3), c(pred_VBGF, pred_Gomp, pred_ave), c(rep("VBGF", 100), rep("Gompertz",100), rep("Average", 100)))
+colnames(dataset) <- c("Age", "Esimated length", "Model")
+
+#draw graph
+p <- ggplot() +
+    geom_line(aes(x = dataset$Age, y = dataset$`Esimated length`, col = dataset$Model)) +
+    scale_color_discrete(name = "Model") +
+    labs(title = "Regression model using von Bertalanffy and Gompertz growth function", x = "Age", y = "Fish length")
+p + geom_point(aes(x = data[, 1], y = data[, 2]))
+
+#graph with jittering
+p + geom_jitter(aes(x = data[, 1], y = data[, 2]))
+```
+
+We can see that all models make very similar estimations, and our model does fit the data well.

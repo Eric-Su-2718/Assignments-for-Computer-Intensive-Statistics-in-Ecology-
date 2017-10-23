@@ -1,0 +1,182 @@
+---
+title: "HW #16 Computer Intensive Statistics in Ecology"
+author: "Ä¬¥D©¶ Eric Su"
+date: "2017/6/12"
+output: html_document
+---
+[Click here for other works of the author on RPubs](http://rpubs.com/prorichter)
+
+In this assignment, we build a very simple neural network model with one layer of neurons and no hidden layers. We also compare the efficiency of sequential and batch update methods.
+
+### Q1. Simulate your test data. Training set: Draw $x_1$ ~ $Unif(-1, 1)$ and $x_2$ ~ $Unif(-1, 1)$ independently. And compute $y=3x_1-2x_2$. Likewise, generate your training test set. (Simulate 1000 data points for each set.)
+Generate data for training and test set with some normally distributed noise
+```{r}
+#generate training set
+x1 = runif(1000, -1, 1)
+x2 = runif(1000, -1, 1)
+train = data.frame(x1, x2, y = 3 * x1 - 2 * x2 + rnorm(1000, sd = 0.3))
+
+#generate test set
+x1_2 = runif(1000, -1, 1)
+x2_2 = runif(1000, -1, 1)
+test = data.frame(x1_2, x2_2, y = 3 * x1_2 - 2 * x2_2 + rnorm(1000, sd = 0.3))
+```
+
+### Q2. Use your training set to train your neural network using adaline (remember to include a bias term). Plot MSE vs # of training. Report your optimal weights that minimize mean square errors (MSE).
+
+#### Self-defined adaptive linear learning function - sequential update
+Define function `adaline` to optimize weights in a simple neural network model. The function uses sequential update.
+```{r}
+adaline <- function(iv, dv, learn_rate = 0.01, inits = runif(ncol(iv) + 1, -0.5, 0.5)){
+    n = length(dv)
+    iv_matrix = data.frame(rep(1, n), iv)
+    
+    weights = matrix(0, nrow = n + 1, ncol = length(inits))
+    weights[1, ] = inits
+    
+    pred = numeric(n)
+    error = numeric(n)
+    
+    for(i in 1:n){
+        pred[i] = sum(weights[i, ] * iv_matrix[i, ])
+        error[i] = dv[i] - pred[i]
+        weights[1 + i, ] = unlist(weights[i, ] + learn_rate * iv_matrix[i, ] * error[i])
+    }
+    
+    return(list(pred = pred, error = error, weights= weights))
+}
+```
+
+
+#### Conduct algorithm to find the optimal weights for each node
+```{r}
+model = adaline(iv = train[, 1:2], dv = train[, 3])
+```
+
+
+#### Self-defined adaptive linear learning function - batch update
+Define function `adaline` to optimize weights in a simple neural network model. The function uses batch update (matrix computation).
+```{r}
+adaline_m <- function(iv, dv, n = 1000, learn_rate = 0.001, inits = runif(ncol(iv) + 1, -0.5, 0.5)){
+    weight = t(as.matrix(inits))
+    n_data = length(dv)
+    iv_matrix = as.matrix(data.frame(rep(1, n_data), iv))
+    weights = matrix(0, nrow = n, ncol = length(inits))
+    mse = numeric()
+    errors = numeric()
+    
+    for(i in 1:n){
+    pred = as.vector(weight %*% t(iv_matrix))
+    error = as.matrix(dv - pred)
+    weight = weight + learn_rate * as.vector(t(iv_matrix) %*% error)
+    
+    weights[i,] = weight
+    mse[i] = mean(error ^ 2)
+    errors[i] = mean(abs(error))
+    }
+    return(list(weights = weights, mse = mse, error = errors))
+}
+```
+
+
+#### Conduct algorithm to find the optimal weights for each node using the second function defined
+```{r}
+model_m = adaline_m(iv = train[,1:2], dv = train[,3])
+```
+
+
+#### Compare run time using sequential and batch updating method
+```{r}
+Sequential = system.time(adaline(iv = train[,1:2], dv = train[,3]))
+Batch = system.time(adaline_m(iv = train[,1:2], dv = train[,3]))
+
+knitr::kable(t(cbind(Sequential, Batch))[, 1:3])
+```
+
+Algorithm using batch update is substantially faster than sequential updating.
+
+
+#### Plot the prediction error of each data in each iteration of training {.tabset}
+
+##### Sequential update
+```{r}
+plot(1:1000, model$error, type = "l", xlab = "Number of training", ylab = "Prediction error")
+```
+
+##### Batch update
+```{r}
+plot(1:1000, model_m$error, type = "l", xlab = "Number of training", ylab = "Prediction error")
+```
+
+####
+
+Error does not converge to 0 because random noise is added to our data.
+
+#### Calculate MSE at each training iteration
+
+Define function to calculate MSE of prediction
+```{r}
+mse <- function(weights, iv, dv){
+    iv = as.matrix(iv)
+    pred = rowSums(t(apply(iv, 1, function(x) weights * x)))
+    mse = sum((dv - pred) ^ 2) /length(dv)
+    return(mse)
+}
+```
+
+#### MSE plots {.tabset}
+
+##### Sequential update
+```{r}
+#calculate MSE at each number of training
+mse_train = apply(model$weights, 1, mse, iv = data.frame(rep(1, 1000), train[, 1:2]), dv = train[, 3])
+
+plot(0:1000, mse_train, type = "l", main = "MSE according to number of training (training set)", xlab = "Number of training", ylab = "MSE")
+```
+
+##### Batch update
+```{r}
+#calculate MSE at each number of training
+mse_train = apply(model_m$weights, 1, mse, iv = data.frame(rep(1, 1000), train[, 1:2]), dv = train[, 3])
+
+plot(1:1000, mse_train, type = "l", main = "MSE according to number of training (training set)", xlab = "Number of training", ylab = "MSE")
+```
+
+####
+
+MSE of the training set generally decreases as we train our model through more iterations. It also decreases much faster when batch update method is used.
+
+
+#### Find optimal weights that minimize MSE
+```{r}
+min_mse = which.min(mse_train)
+optim_weight = model_m$weights[min_mse, ]
+
+optim_weight = data.frame(optim_weight)
+rownames(optim_weight) <- c("Error term (intercept)", "X1", "X2")
+knitr::kable(optim_weight, col.names = c("Weights for variables"))
+```
+
+The MSE for the training set using the optimal weights is `r mse_train[min_mse]`
+
+
+### Q3. Use the optimal weights to predict training test set and calculate the MSE for the training test set. {.tabset}
+Calculate MSE using weights from each training iteration for the test set, also plot MSE vs number of training.
+
+#### Sequential update
+```{r}
+mse_test = apply(model$weights, 1, mse, iv = data.frame(rep(1, 1000), test[, 1:2]), dv = test[, 3])
+
+plot(0:1000, mse_test, type = "l", main = "MSE according to number of training (test set)", xlab = "Number of training", ylab = "MSE")
+```
+
+#### Batch update
+```{r}
+mse_test_m = apply(model_m$weights, 1, mse, iv = data.frame(rep(1, 1000), test[, 1:2]), dv = test[, 3])
+
+plot(1:1000, mse_test_m, type = "l", main = "MSE according to number of training (test set)", xlab = "Number of training", ylab = "MSE")
+```
+
+####
+
+MSE of the test set generally decreases as weights later training iterations. The MSE for the test set using the optimal weights is `r mse_test[min_mse]`
