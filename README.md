@@ -1,7 +1,7 @@
 # Assignments for Computer Intensive Statistics in Ecology
-My R codes for assignments in the course "Computer Intensive Statistics in Ecology". 
+My R code for assignments in the course "Computer Intensive Statistics in Ecology". 
 
-Each file contains codes that implement one or more computationally intensive methods using R. 
+Each file contains code that implements one or more computationally intensive methods using R. 
 
 Methods include: 
 * Bootstrap
