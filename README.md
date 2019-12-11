@@ -5,4 +5,17 @@ Each file contains codes that implement one or more computationally intensive me
 
 Methods include: 
 * Bootstrap
-* Jackknife, Permutation test, function optimization, k-means clustering, hierarchical clustering, linear discriminant analysis (LDA), decision tree (CART), random forest, multinomial logistics regression, support vector machine, principal component analysis (PCA), multidimensional scaling (MDS), model selection criterion, Markov chain Monte Carlo algorithm (MCMC), and Neural network
+* Jackknife
+* Permutation test
+* Function optimization
+* K-means clustering
+* Hierarchical clustering
+* Linear discriminant analysis (LDA)
+* Decision tree (CART) and random forest
+* Multinomial logistics regression
+* Support vector machine
+* Principal component analysis (PCA)
+* Multidimensional scaling (MDS)
+* Model selection criterion (AIC, BIC)
+* Markov chain Monte Carlo algorithm (MCMC)
+* Neural network
